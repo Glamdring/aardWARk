@@ -1,5 +1,6 @@
 package bg.bozho.aardwark;
 
+import java.io.FileNotFoundException;
 import java.io.FileReader;
 import java.io.IOException;
 import java.io.Reader;
@@ -21,8 +22,10 @@ import javax.servlet.ServletContextListener;
 import javax.servlet.annotation.WebListener;
 
 import org.apache.maven.model.Model;
+import org.apache.maven.model.Parent;
 import org.apache.maven.model.Plugin;
 import org.apache.maven.model.io.xpp3.MavenXpp3Reader;
+import org.apache.maven.plugin.MojoFailureException;
 import org.codehaus.plexus.util.xml.Xpp3Dom;
 import org.codehaus.plexus.util.xml.pull.XmlPullParserException;
 
@@ -37,63 +40,80 @@ public class StartupListener implements ServletContextListener {
         String projectDir = sce.getServletContext().getContextPath().replace("/aardwark-", "").replace('.', '/');
 
         try {
-            Model model = null;
-            Reader reader = null;
-            try {
-                reader = new FileReader(fs.getPath(projectDir, "pom.xml").toFile());
-                MavenXpp3Reader xpp3Reader = new MavenXpp3Reader();
-                model = xpp3Reader.read(reader);
-            } catch (XmlPullParserException e) {
-                throw new IllegalStateException("Cannot read maven model");
-            } finally {
-                reader.close();
-            }
+            Model model = readMavenModel(fs, projectDir);
+
 
             final WatchService watcher = fs.newWatchService();
             final Path projectPath = fs.getPath(projectDir);
             final Path webappPath = fs.getPath(sce.getServletContext().getRealPath("/")).getParent().resolve(getTargetWebapp(model));
 
-            projectPath.register(watcher, StandardWatchEventKinds.ENTRY_CREATE,
-                    StandardWatchEventKinds.ENTRY_MODIFY, StandardWatchEventKinds.ENTRY_DELETE);
             executor = Executors.newSingleThreadExecutor();
-            executor.submit(new Runnable() {
-                @Override
-                public void run() {
-                    try {
-                        WatchKey key;
-                        while ((key = watcher.take()) != null) {
-                            List<WatchEvent<?>> events = key.pollEvents();
-                            for (WatchEvent<?> event : events) {
-                                try {
-                                    Path eventPath = (Path) event.context();
-                                    Path target = determineTarget(eventPath, webappPath);
-                                    if (target != null) {
-                                        if (event.kind() == StandardWatchEventKinds.ENTRY_CREATE || event.kind() == StandardWatchEventKinds.ENTRY_MODIFY) {
-                                            Files.copy(eventPath, target, StandardCopyOption.REPLACE_EXISTING);
-                                        }
-                                        if (event.kind() == StandardWatchEventKinds.ENTRY_DELETE) {
-                                            Files.deleteIfExists(determineTarget(eventPath, webappPath));
-                                        }
-                                    }
-                                    if (eventPath.endsWith("pom.xml")) {
-                                        // TODO update dependencies
-                                    }
-                                } catch (IOException ex) {
-                                    ex.printStackTrace();
-                                    // TODO warn
-                                }
-                            }
-                        }
-                    } catch (InterruptedException ex) {
-                        ex.printStackTrace();
-                        //TODO warn
-                        // return - the executor has been shutdown
-                    }
-                }
-            });
+            watchProject(projectPath, webappPath, watcher, false);
+
+            // also watch dependent projects that are within the same workspace, so that their classes are copied as well (rather than their jars). TODO remove these jars from the copied dependencies
+            Parent parent = model.getParent();
+            // TODO recursively resolve dependent projects
+            // 1. get current dependencies 2. match them against the artifact ids of all projects in the project-space
         } catch (IOException e) {
             throw new IllegalStateException("Failed to watch file system", e);
         }
+    }
+
+    private void watchProject(Path projectPath, final Path webappPath, final WatchService watcher, final boolean dependencyProject) throws IOException {
+
+        projectPath.register(watcher, StandardWatchEventKinds.ENTRY_CREATE,
+                StandardWatchEventKinds.ENTRY_MODIFY, StandardWatchEventKinds.ENTRY_DELETE);
+
+        executor.submit(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    WatchKey key;
+                    while ((key = watcher.take()) != null) {
+                        List<WatchEvent<?>> events = key.pollEvents();
+                        for (WatchEvent<?> event : events) {
+                            try {
+                                Path eventPath = (Path) event.context();
+                                Path target = determineTarget(eventPath, webappPath);
+                                if (target != null) {
+                                    if (event.kind() == StandardWatchEventKinds.ENTRY_CREATE || event.kind() == StandardWatchEventKinds.ENTRY_MODIFY) {
+                                        Files.copy(eventPath, target, StandardCopyOption.REPLACE_EXISTING);
+                                    }
+                                    if (event.kind() == StandardWatchEventKinds.ENTRY_DELETE) {
+                                        Files.deleteIfExists(determineTarget(eventPath, webappPath));
+                                    }
+                                }
+                                if (!dependencyProject && eventPath.endsWith("pom.xml")) {
+                                    //copyDependencies(projectDir, fs, target);
+                                }
+                            } catch (IOException ex) {
+                                ex.printStackTrace();
+                                // TODO warn
+                            }
+                        }
+                    }
+                } catch (InterruptedException ex) {
+                    ex.printStackTrace();
+                    //TODO warn
+                    // return - the executor has been shutdown
+                }
+            }
+        });
+    }
+
+    private Model readMavenModel(FileSystem fs, String projectDir) throws FileNotFoundException, IOException {
+        Model model = null;
+        Reader reader = null;
+        try {
+            reader = new FileReader(fs.getPath(projectDir, "pom.xml").toFile());
+            MavenXpp3Reader xpp3Reader = new MavenXpp3Reader();
+            model = xpp3Reader.read(reader);
+        } catch (XmlPullParserException e) {
+            throw new IllegalStateException("Cannot read maven model");
+        } finally {
+            reader.close();
+        }
+        return model;
     }
 
     private String getTargetWebapp(Model model) {
@@ -120,6 +140,11 @@ public class StartupListener implements ServletContextListener {
         return null;
     }
 
+    private void copyDependencies(String projectDir, FileSystem fs, Path target) throws IOException, MojoFailureException {
+        //CopyDependenciesMojo copy = new CopyDependenciesMojo();
+        //copy.setOutputDirectory(target.resolve("/WEB-INF/lib").toFile());
+        //copy.execute();
+    }
     public void contextDestroyed(ServletContextEvent sce) {
         executor.shutdownNow();
     }
