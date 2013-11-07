@@ -11,6 +11,7 @@ import static org.twdata.maven.mojoexecutor.MojoExecutor.name;
 import static org.twdata.maven.mojoexecutor.MojoExecutor.plugin;
 import static org.twdata.maven.mojoexecutor.MojoExecutor.version;
 
+import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.FileReader;
 import java.io.IOException;
@@ -24,7 +25,9 @@ import java.nio.file.StandardWatchEventKinds;
 import java.nio.file.WatchEvent;
 import java.nio.file.WatchKey;
 import java.nio.file.WatchService;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -37,6 +40,7 @@ import org.apache.maven.execution.DefaultMavenExecutionResult;
 import org.apache.maven.execution.MavenExecutionRequest;
 import org.apache.maven.execution.MavenExecutionResult;
 import org.apache.maven.execution.MavenSession;
+import org.apache.maven.model.Dependency;
 import org.apache.maven.model.Model;
 import org.apache.maven.model.Plugin;
 import org.apache.maven.model.io.xpp3.MavenXpp3Reader;
@@ -57,33 +61,63 @@ public class StartupListener implements ServletContextListener {
 
     private ExecutorService executor;
     private BuildPluginManager pluginManager = new DefaultBuildPluginManager();
-    
+    private WatchService watcher;
+    private FileSystem fs = FileSystems.getDefault();
+    private Path webappPath;
+    private Path projectPath;
+
     public void contextInitialized(ServletContextEvent sce) {
-        FileSystem fs = FileSystems.getDefault();
 
         String projectDir = sce.getServletContext().getContextPath().replace("/aardwark-", "").replace('.', '/');
 
         try {
-            Model model = readMavenModel(fs, projectDir);
+            Model model = readMavenModel(projectDir);
 
-            final WatchService watcher = fs.newWatchService();
-            final Path projectPath = fs.getPath(projectDir);
-            final Path webappPath = fs.getPath(sce.getServletContext().getRealPath("/")).getParent().resolve(getTargetWebapp(model));
+            watcher = fs.newWatchService();
+            projectPath = fs.getPath(projectDir);
+            webappPath = fs.getPath(sce.getServletContext().getRealPath("/")).getParent().resolve(getTargetWebapp(model));
             MavenProject project = new MavenProject(model);
-            
+
             executor = Executors.newSingleThreadExecutor();
-            watchProject(projectPath, webappPath, watcher, project, false);
+            watchProject(projectPath, project, false);
 
             // also watch dependent projects that are within the same workspace, so that their classes are copied as well (rather than their jars). TODO remove these jars from the copied dependencies
-            
-            // TODO recursively resolve dependent projects
-            // 1. get current dependencies 2. match them against the artifact ids of all projects in the project-space
+            Set<String> dependencies = new HashSet<>();
+            for (Dependency dependency : project.getDependencies()) {
+                dependencies.add(dependency.getGroupId() + ":" + dependency.getArtifactId());
+            }
+            Path currentPath = projectPath;
+            MavenProject currentProject = project;
+            while (currentProject != null) {
+                watchDependentProjects(currentProject.getParent(), dependencies, projectPath);
+                currentProject = currentProject.getParent();
+                currentPath = currentPath.getParent();
+            }
         } catch (IOException e) {
             throw new IllegalStateException("Failed to watch file system", e);
         }
     }
 
-    private void watchProject(Path projectPath, final Path webappPath, final WatchService watcher, final MavenProject project, final boolean dependencyProject) throws IOException {
+    private void watchDependentProjects(MavenProject project, Set<String> dependencies, Path projectPath) throws IOException {
+        if (project == null) {
+            return;
+        }
+
+        List<String> modules = project.getModules();
+        if ((modules == null || modules.isEmpty())) {
+            if (dependencies.contains(project.getGroupId() + ":" + project.getArtifactId())) {
+                watchProject(projectPath, null, true);
+            }
+        } else {
+            for (String module : modules) {
+                Path modulePath = projectPath.resolve(module);
+                Model model = readMavenModel(modulePath.toString());
+                watchDependentProjects(new MavenProject(model), dependencies, modulePath);
+            }
+        }
+    }
+
+    private void watchProject(Path projectPath, final MavenProject project, final boolean dependencyProject) throws IOException {
 
         projectPath.register(watcher, StandardWatchEventKinds.ENTRY_CREATE,
                 StandardWatchEventKinds.ENTRY_MODIFY, StandardWatchEventKinds.ENTRY_DELETE);
@@ -108,7 +142,7 @@ public class StartupListener implements ServletContextListener {
                                     }
                                 }
                                 if (!dependencyProject && eventPath.endsWith("pom.xml")) {
-                                    copyDependencies(project, target);
+                                    copyDependencies(project);
                                 }
                             } catch (IOException | MojoExecutionException ex) {
                                 ex.printStackTrace();
@@ -125,7 +159,7 @@ public class StartupListener implements ServletContextListener {
         });
     }
 
-    private Model readMavenModel(FileSystem fs, String projectDir) throws FileNotFoundException, IOException {
+    private Model readMavenModel(String projectDir) throws FileNotFoundException, IOException {
         Model model = null;
         Reader reader = null;
         try {
@@ -158,48 +192,55 @@ public class StartupListener implements ServletContextListener {
             return webappPath;
         }
         if (projectPath.toString().contains("target/classes")) {
-            return webappPath.resolve("/WEB-INF/classes");
+            return webappPath.resolve("WEB-INF/classes");
         }
 
         return null;
     }
 
-    private void copyDependencies(MavenProject project, Path target) throws IOException, MojoExecutionException {
-    	
-    	MavenSession session = null;
-    	
-    	try {
-			PlexusContainer container = new DefaultPlexusContainer();
-			RepositorySystemSession repoSession = new DefaultRepositorySystemSession();
-			MavenExecutionRequest request = new DefaultMavenExecutionRequest();
-			MavenExecutionResult result = new DefaultMavenExecutionResult().setProject(project);
-			session = new MavenSession(container, repoSession, request, result);
-		} catch (PlexusContainerException e) {
-			throw new IllegalStateException(e);
-		}
-    	
-    	Path lib = target.resolve("/WEB-INF/lib");
-    	Files.deleteIfExists(lib); //clear
-    	Files.createDirectory(lib); //re-create
-    	
+    private void copyDependencies(MavenProject project) throws IOException, MojoExecutionException {
+
+        MavenSession session = null;
+
+        try {
+            PlexusContainer container = new DefaultPlexusContainer();
+            RepositorySystemSession repoSession = new DefaultRepositorySystemSession();
+            MavenExecutionRequest request = new DefaultMavenExecutionRequest();
+            MavenExecutionResult result = new DefaultMavenExecutionResult().setProject(project);
+            session = new MavenSession(container, repoSession, request, result);
+        } catch (PlexusContainerException e) {
+            throw new IllegalStateException(e);
+        }
+
+        Path lib = webappPath.resolve("WEB-INF/lib");
+        File[] libs = lib.toFile().listFiles();
+        for (File libFile : libs) {
+            libFile.delete();
+        }
+
         executeMojo(
-    	    plugin(
-    	        groupId("org.apache.maven.plugins"),
-    	        artifactId("maven-dependency-plugin"),
-    	        version("2.0")
-    	    ),
-    	    goal("copy-dependencies"),
-    	    configuration(
-    	        element(name("outputDirectory"), lib.toString())
-    	    ),
-    	    executionEnvironment(
-    	        project,
-    	        session,
-    	        pluginManager
-    	    )
-    	);
+            plugin(
+                groupId("org.apache.maven.plugins"),
+                artifactId("maven-dependency-plugin"),
+                version("2.8")
+            ),
+            goal("copy-dependencies"),
+            configuration(
+                element(name("outputDirectory"), lib.toString())
+            ),
+            executionEnvironment(
+                project,
+                session,
+                pluginManager
+            )
+        );
     }
     public void contextDestroyed(ServletContextEvent sce) {
+        try {
+            watcher.close();
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
         executor.shutdownNow();
     }
 
