@@ -25,6 +25,7 @@ import java.nio.file.StandardWatchEventKinds;
 import java.nio.file.WatchEvent;
 import java.nio.file.WatchKey;
 import java.nio.file.WatchService;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -48,6 +49,10 @@ import org.apache.maven.plugin.BuildPluginManager;
 import org.apache.maven.plugin.DefaultBuildPluginManager;
 import org.apache.maven.plugin.MojoExecutionException;
 import org.apache.maven.project.MavenProject;
+import org.apache.maven.shared.invoker.DefaultInvocationRequest;
+import org.apache.maven.shared.invoker.DefaultInvoker;
+import org.apache.maven.shared.invoker.InvocationRequest;
+import org.apache.maven.shared.invoker.Invoker;
 import org.codehaus.plexus.DefaultPlexusContainer;
 import org.codehaus.plexus.PlexusContainer;
 import org.codehaus.plexus.PlexusContainerException;
@@ -199,18 +204,18 @@ public class StartupListener implements ServletContextListener {
     }
 
     private void copyDependencies(MavenProject project) throws IOException, MojoExecutionException {
-
-        MavenSession session = null;
-
-        try {
-            PlexusContainer container = new DefaultPlexusContainer();
-            RepositorySystemSession repoSession = new DefaultRepositorySystemSession();
-            MavenExecutionRequest request = new DefaultMavenExecutionRequest();
-            MavenExecutionResult result = new DefaultMavenExecutionResult().setProject(project);
-            session = new MavenSession(container, repoSession, request, result);
-        } catch (PlexusContainerException e) {
-            throw new IllegalStateException(e);
-        }
+//
+//        MavenSession session = null;
+//
+//        try {
+//            PlexusContainer container = new DefaultPlexusContainer();
+//            RepositorySystemSession repoSession = new DefaultRepositorySystemSession();
+//            MavenExecutionRequest request = new DefaultMavenExecutionRequest();
+//            MavenExecutionResult result = new DefaultMavenExecutionResult().setProject(project);
+//            session = new MavenSession(container, repoSession, request, result);
+//        } catch (PlexusContainerException e) {
+//            throw new IllegalStateException(e);
+//        }
 
         Path lib = webappPath.resolve("WEB-INF/lib");
         File[] libs = lib.toFile().listFiles();
@@ -218,22 +223,36 @@ public class StartupListener implements ServletContextListener {
             libFile.delete();
         }
 
-        executeMojo(
-            plugin(
-                groupId("org.apache.maven.plugins"),
-                artifactId("maven-dependency-plugin"),
-                version("2.8")
-            ),
-            goal("copy-dependencies"),
-            configuration(
-                element(name("outputDirectory"), lib.toString())
-            ),
-            executionEnvironment(
-                project,
-                session,
-                pluginManager
-            )
-        );
+        InvocationRequest request = new DefaultInvocationRequest();
+        request.setPomFile(projectPath.resolve("pom.xml").toFile());
+        request.setBaseDirectory(projectPath.toFile());
+        request.setGoals(Collections.singletonList("dependency:copy"));
+        request.setMavenOpts("-DoutputDirectory=" + lib.toString());
+
+        Invoker invoker = new DefaultInvoker();
+        invoker.setMavenHome(new File(System.getProperty("user.home") + "/.m2"));
+        try {
+            invoker.execute(request);
+        } catch (Exception ex) {
+            ex.printStackTrace();
+        }
+
+//        executeMojo(
+//            plugin(
+//                groupId("org.apache.maven.plugins"),
+//                artifactId("maven-dependency-plugin"),
+//                version("2.8")
+//            ),
+//            goal("copy-dependencies"),
+//            configuration(
+//                element(name("outputDirectory"), lib.toString())
+//            ),
+//            executionEnvironment(
+//                project,
+//                session,
+//                pluginManager
+//            )
+//        );
     }
     public void contextDestroyed(ServletContextEvent sce) {
         try {
