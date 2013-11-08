@@ -10,6 +10,8 @@ import static org.twdata.maven.mojoexecutor.MojoExecutor.groupId;
 import static org.twdata.maven.mojoexecutor.MojoExecutor.name;
 import static org.twdata.maven.mojoexecutor.MojoExecutor.plugin;
 import static org.twdata.maven.mojoexecutor.MojoExecutor.version;
+import hudson.maven.MavenEmbedder;
+import hudson.maven.MavenRequest;
 
 import java.io.File;
 import java.io.FileNotFoundException;
@@ -204,18 +206,25 @@ public class StartupListener implements ServletContextListener {
     }
 
     private void copyDependencies(MavenProject project) throws IOException, MojoExecutionException {
-//
-//        MavenSession session = null;
-//
-//        try {
-//            PlexusContainer container = new DefaultPlexusContainer();
-//            RepositorySystemSession repoSession = new DefaultRepositorySystemSession();
-//            MavenExecutionRequest request = new DefaultMavenExecutionRequest();
-//            MavenExecutionResult result = new DefaultMavenExecutionResult().setProject(project);
-//            session = new MavenSession(container, repoSession, request, result);
-//        } catch (PlexusContainerException e) {
-//            throw new IllegalStateException(e);
-//        }
+
+        MavenRequest req = new MavenRequest();
+        req.setBaseDirectory(project.getBasedir().getAbsolutePath());
+        req.setGoals(Collections.singletonList("dependency:copy-dependencies"));
+
+        MavenSession session = null;
+
+        MavenEmbedder embedder = null;
+        try {
+            embedder = new MavenEmbedder(getClass().getClassLoader(), req);
+            embedder.execute(req);
+            PlexusContainer container = new DefaultPlexusContainer();
+            RepositorySystemSession repoSession = new DefaultRepositorySystemSession();
+            MavenExecutionRequest request = new DefaultMavenExecutionRequest();
+            MavenExecutionResult result = new DefaultMavenExecutionResult().setProject(project);
+            session = new MavenSession(container, repoSession, request, result);
+        } catch (Exception e) {
+            throw new IllegalStateException(e);
+        }
 
         Path lib = webappPath.resolve("WEB-INF/lib");
         File[] libs = lib.toFile().listFiles();
@@ -226,33 +235,32 @@ public class StartupListener implements ServletContextListener {
         InvocationRequest request = new DefaultInvocationRequest();
         request.setPomFile(projectPath.resolve("pom.xml").toFile());
         request.setBaseDirectory(projectPath.toFile());
-        request.setGoals(Collections.singletonList("dependency:copy"));
+        request.setGoals(Collections.singletonList("dependency:copy-dependencies"));
         request.setMavenOpts("-DoutputDirectory=" + lib.toString());
 
         Invoker invoker = new DefaultInvoker();
-        invoker.setMavenHome(new File(System.getProperty("user.home") + "/.m2"));
         try {
             invoker.execute(request);
         } catch (Exception ex) {
             ex.printStackTrace();
         }
 
-//        executeMojo(
-//            plugin(
-//                groupId("org.apache.maven.plugins"),
-//                artifactId("maven-dependency-plugin"),
-//                version("2.8")
-//            ),
-//            goal("copy-dependencies"),
-//            configuration(
-//                element(name("outputDirectory"), lib.toString())
-//            ),
-//            executionEnvironment(
-//                project,
-//                session,
-//                pluginManager
-//            )
-//        );
+        executeMojo(
+            plugin(
+                groupId("org.apache.maven.plugins"),
+                artifactId("maven-dependency-plugin"),
+                version("2.8")
+            ),
+            goal("copy-dependencies"),
+            configuration(
+                element(name("outputDirectory"), lib.toString())
+            ),
+            executionEnvironment(
+                project,
+                session,
+                pluginManager
+            )
+        );
     }
     public void contextDestroyed(ServletContextEvent sce) {
         try {

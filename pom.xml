@@ -5,6 +5,14 @@
     <artifactId>aardwark</artifactId>
     <version>0.0.1-SNAPSHOT</version>
     <packaging>war</packaging>
+
+    <repositories>
+        <repository>
+            <id>jenkins-releases</id>
+            <url>http://repo.jenkins-ci.org/releases/</url>
+        </repository>
+    </repositories>
+
     <dependencies>
         <dependency>
             <groupId>org.apache.maven</groupId>
@@ -30,6 +38,11 @@
             <groupId>org.slf4j</groupId>
             <artifactId>slf4j-api</artifactId>
             <version>1.7.5</version>
+        </dependency>
+        <dependency>
+            <groupId>org.jenkins-ci.lib</groupId>
+            <artifactId>lib-jenkins-maven-embedder</artifactId>
+            <version>3.11</version>
         </dependency>
     </dependencies>
 
