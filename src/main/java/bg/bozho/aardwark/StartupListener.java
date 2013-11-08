@@ -112,7 +112,7 @@ public class StartupListener implements ServletContextListener {
         }
     }
 
-    private void watchDependentProjects(Model model, Set<String> dependencies, Path projectPath) throws IOException {
+    void watchDependentProjects(Model model, Set<String> dependencies, Path projectPath) throws IOException {
         if (model == null) {
             return;
         }
@@ -154,14 +154,15 @@ public class StartupListener implements ServletContextListener {
                         List<WatchEvent<?>> events = key.pollEvents();
                         for (WatchEvent<?> event : events) {
                             try {
-                                Path eventPath = paths.get(key).resolve((Path) event.context());
-                                Path target = determineTarget(eventPath, webappPath);
+                            	Path filename = (Path) event.context();
+                                Path eventPath = paths.get(key).resolve(filename);
+                                Path target = determineTarget(eventPath);
                                 if (target != null) {
                                     if (event.kind() == StandardWatchEventKinds.ENTRY_CREATE || event.kind() == StandardWatchEventKinds.ENTRY_MODIFY) {
-                                        Files.copy(eventPath, target, StandardCopyOption.REPLACE_EXISTING);
+                                        Files.copy(eventPath, target.resolve(filename), StandardCopyOption.REPLACE_EXISTING);
                                     }
                                     if (event.kind() == StandardWatchEventKinds.ENTRY_DELETE) {
-                                        Files.deleteIfExists(determineTarget(eventPath, webappPath));
+                                        Files.deleteIfExists(determineTarget(eventPath).resolve(filename));
                                     }
                                 }
                                 if (!dependencyProject && eventPath.endsWith("pom.xml")) {
@@ -216,12 +217,14 @@ public class StartupListener implements ServletContextListener {
         return model.getArtifactId();
     }
 
-    private Path determineTarget(Path filePath, Path webappPath) {
+    Path determineTarget(Path filePath) {
         if (filePath.toString().contains("src" + File.separator + "main" + File.separator + "webapp")) {
-            return webappPath;
+        	Path pathWithinProject = projectPath.resolve("src/main/webapp").relativize(filePath);
+            return webappPath.resolve(pathWithinProject);
         }
         if (filePath.toString().contains("target" + File.separator + "classes")) {
-            return webappPath.resolve("WEB-INF/classes");
+        	Path pathWithinClasspath = projectPath.resolve("target/classes").relativize(filePath);
+            return webappPath.resolve("WEB-INF/classes").resolve(pathWithinClasspath);
         }
 
         return null;
@@ -292,5 +295,16 @@ public class StartupListener implements ServletContextListener {
         }
         executor.shutdownNow();
     }
-
+    
+    public void setProjectPath(Path projectPath) {
+		this.projectPath = projectPath;
+	}
+    
+    public void setWebappPath(Path webappPath) {
+		this.webappPath = webappPath;
+	}
+    
+    public void setWatcher(WatchService watcher) {
+		this.watcher = watcher;
+	}
 }
