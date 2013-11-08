@@ -16,33 +16,37 @@ import com.google.common.collect.Lists;
 
 public class SyncTest {
 
-	@Test
-	public void targetPathTest() {
-		FileSystem fs = FileSystems.getDefault();
-		StartupListener listener = new StartupListener();
-		Path projectPath = fs.getPath("/workspace/foo/bar");
-		listener.setProjectPath(projectPath);
-		listener.setWebappPath(fs.getPath("/tomcat/webapps/bar"));
-		Path target = listener.determineTarget(fs.getPath("/workspace/foo/bar/target/classes/bg/bozho/Some.class"), projectPath);
-		// replacing "\" with "/", so that the test works on both OSs
-		Assert.assertEquals("/tomcat/webapps/bar/WEB-INF/classes/bg/bozho/Some.class", target.toString().replace("\\", "/"));
-	}
-	
-	@Test
-	public void watchDependentProjectsTest() throws Exception {
-		FileSystem fs = FileSystems.getDefault();
-		StartupListener listener = new StartupListener();
-		listener.setProjectPath(fs.getPath("/workspace/foo/bar"));
-		listener.setWebappPath(fs.getPath("/tomcat/webapps/bar"));
-		WatchService watcher = Mockito.mock(WatchService.class);
-		listener.setWatcher(watcher);
-		listener = Mockito.spy(listener);
-		Set<String> dependencies = new HashSet<>();
-		dependencies.add("another");
-		Model model = new Model();
-		model.setModules(Lists.newArrayList("another"));
-		listener.watchDependentProjects(model, dependencies, fs.getPath("/workspace/foo/another"));
-		// one direct invocation + one invocation for the dependent project "another"
-		Mockito.verify(listener, Mockito.times(2)).watchDependentProjects(Mockito.<Model>any(), Mockito.<Set<String>>any(), Mockito.<Path>any());
-	}
+    @Test
+    public void targetPathTest() {
+        FileSystem fs = FileSystems.getDefault();
+        StartupListener listener = new StartupListener();
+        Path projectPath = fs.getPath("/workspace/foo/bar");
+        listener.setProjectPath(projectPath);
+        listener.setWebappPath(fs.getPath("/tomcat/webapps/bar"));
+        Path target = listener.determineTarget(fs.getPath("/workspace/foo/bar/target/classes/bg/bozho/Some.class"),
+                projectPath);
+        // replacing "\" with "/", so that the test works on both OSs
+        Assert.assertEquals("/tomcat/webapps/bar/WEB-INF/classes/bg/bozho/Some.class",
+                target.toString().replace("\\", "/"));
+    }
+
+    @Test
+    public void watchDependentProjectsTest() throws Exception {
+        FileSystem fs = FileSystems.getDefault();
+        StartupListener listener = new StartupListener();
+        listener.setProjectPath(fs.getPath("/workspace/foo/bar"));
+        listener.setWebappPath(fs.getPath("/tomcat/webapps/bar"));
+        WatchService watcher = Mockito.mock(WatchService.class);
+        listener.setWatcher(watcher);
+        listener = Mockito.spy(listener);
+        Set<String> dependencies = new HashSet<>();
+        dependencies.add("another");
+        Model model = new Model();
+        model.setModules(Lists.newArrayList("another"));
+        listener.watchDependentProjects(model, dependencies, fs.getPath("/workspace/foo/another"));
+        // one direct invocation + one invocation for the dependent project
+        // "another"
+        Mockito.verify(listener, Mockito.times(2)).watchDependentProjects(Mockito.<Model> any(),
+                Mockito.<Set<String>> any(), Mockito.<Path> any());
+    }
 }
