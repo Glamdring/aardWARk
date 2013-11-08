@@ -7,12 +7,10 @@ import java.nio.file.WatchService;
 import java.util.HashSet;
 import java.util.Set;
 
-import org.apache.maven.model.Dependency;
 import org.apache.maven.model.Model;
 import org.junit.Assert;
 import org.junit.Test;
 import org.mockito.Mockito;
-import org.sonatype.aether.util.artifact.DefaultArtifact;
 
 import com.google.common.collect.Lists;
 
@@ -22,9 +20,10 @@ public class SyncTest {
 	public void targetPathTest() {
 		FileSystem fs = FileSystems.getDefault();
 		StartupListener listener = new StartupListener();
-		listener.setProjectPath(fs.getPath("/workspace/foo/bar"));
+		Path projectPath = fs.getPath("/workspace/foo/bar");
+		listener.setProjectPath(projectPath);
 		listener.setWebappPath(fs.getPath("/tomcat/webapps/bar"));
-		Path target = listener.determineTarget(fs.getPath("/workspace/foo/bar/target/classes/bg/bozho/Some.class"));
+		Path target = listener.determineTarget(fs.getPath("/workspace/foo/bar/target/classes/bg/bozho/Some.class"), projectPath);
 		// replacing "\" with "/", so that the test works on both OSs
 		Assert.assertEquals("/tomcat/webapps/bar/WEB-INF/classes/bg/bozho/Some.class", target.toString().replace("\\", "/"));
 	}
@@ -39,7 +38,7 @@ public class SyncTest {
 		listener.setWatcher(watcher);
 		listener = Mockito.spy(listener);
 		Set<String> dependencies = new HashSet<>();
-		dependencies.add("com.foo:bar");
+		dependencies.add("another");
 		Model model = new Model();
 		model.setModules(Lists.newArrayList("another"));
 		listener.watchDependentProjects(model, dependencies, fs.getPath("/workspace/foo/another"));

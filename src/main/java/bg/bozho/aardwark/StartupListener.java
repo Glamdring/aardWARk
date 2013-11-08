@@ -76,9 +76,10 @@ public class StartupListener implements ServletContextListener {
     private FileSystem fs = FileSystems.getDefault();
     private Path webappPath;
     private Path projectPath;
-    // a map holding mapping from watch keys to paths, because each WatchEvent contains only the file name, and not the path to the file
-    // using this map we can get the full path to a file for a given WatchEvent
-    private Map<WatchKey, Path> paths = new HashMap<>();
+    // a map holding mapping from watch keys to paths and related metadata, because each WatchEvent contains only the file name, and not the path to the file
+    // using this map we can get the full path to a file for a given WatchEvent. Also, we get the project metadata. This is needed, because only one thread should 
+    // handle WatchEvents, and we should be able to differentiate projects based on the event.
+    private Map<WatchKey, WatchableDirectory> watched = new HashMap<>();
     
     public void contextInitialized(ServletContextEvent sce) {
 
@@ -95,9 +96,10 @@ public class StartupListener implements ServletContextListener {
             watchProject(projectPath, model, false);
 
             // also watch dependent projects that are within the same workspace, so that their classes are copied as well (rather than their jars). TODO remove these jars from the copied dependencies
+            // adding only the artifactId (rather than groupId+artifactId) as groupIds tend to be variables, and we can't resolve variables here. Might lead to inappropriate copies, but they can't do any harm
             Set<String> dependencies = new HashSet<>();
             for (Dependency dependency : model.getDependencies()) {
-                dependencies.add(dependency.getGroupId() + ":" + dependency.getArtifactId());
+                dependencies.add(dependency.getArtifactId());
             }
             Path currentPath = projectPath;
             Model currentModel = model;
@@ -107,6 +109,8 @@ public class StartupListener implements ServletContextListener {
                 watchDependentProjects(currentProjectModel, dependencies, currentPath);
                 currentModel = currentProjectModel;
             }
+            
+            startWatching();
         } catch (IOException e) {
             throw new IllegalStateException("Failed to watch file system", e);
         }
@@ -119,7 +123,7 @@ public class StartupListener implements ServletContextListener {
 
         List<String> modules = model.getModules();
         if ((modules == null || modules.isEmpty())) {
-            if (dependencies.contains(model.getGroupId() + ":" + model.getArtifactId())) {
+            if (dependencies.contains(model.getArtifactId())) {
                 watchProject(projectPath, null, true);
             }
         } else {
@@ -131,7 +135,7 @@ public class StartupListener implements ServletContextListener {
         }
     }
 
-    private void watchProject(Path projectPath, final Model model, final boolean dependencyProject) throws IOException {
+    private void watchProject(final Path projectPath, final Model model, final boolean dependencyProject) throws IOException {
 
     	Files.walkFileTree(projectPath, new SimpleFileVisitor<Path>() {
             @Override
@@ -140,12 +144,14 @@ public class StartupListener implements ServletContextListener {
             {
             	WatchKey key = dir.register(watcher, StandardWatchEventKinds.ENTRY_CREATE,
                         StandardWatchEventKinds.ENTRY_MODIFY, StandardWatchEventKinds.ENTRY_DELETE);
-            	paths.put(key, dir);
+            	watched.put(key, new WatchableDirectory(dir, projectPath, dependencyProject, model));
                 return FileVisitResult.CONTINUE;
             }
         });
-
-        executor.submit(new Runnable() {
+    }
+    
+    private void startWatching() {
+    	executor.submit(new Runnable() {
             @Override
             public void run() {
                 try {
@@ -154,19 +160,21 @@ public class StartupListener implements ServletContextListener {
                         List<WatchEvent<?>> events = key.pollEvents();
                         for (WatchEvent<?> event : events) {
                             try {
+                            	WatchableDirectory watchableDirectory = watched.get(key);
                             	Path filename = (Path) event.context();
-                                Path eventPath = paths.get(key).resolve(filename);
-                                Path target = determineTarget(eventPath);
+                                Path eventPath = watchableDirectory.getDirectory().resolve(filename);
+                                Path target = determineTarget(eventPath, watchableDirectory.getProjectPath());
                                 if (target != null) {
                                     if (event.kind() == StandardWatchEventKinds.ENTRY_CREATE || event.kind() == StandardWatchEventKinds.ENTRY_MODIFY) {
-                                        Files.copy(eventPath, target.resolve(filename), StandardCopyOption.REPLACE_EXISTING);
+                                    	target.toFile().mkdirs(); //make sure the directory structure is in place
+                                        Files.copy(eventPath, target, StandardCopyOption.REPLACE_EXISTING);
                                     }
                                     if (event.kind() == StandardWatchEventKinds.ENTRY_DELETE) {
-                                        Files.deleteIfExists(determineTarget(eventPath).resolve(filename));
+                                        Files.deleteIfExists(determineTarget(eventPath, watchableDirectory.getProjectPath()));
                                     }
                                 }
-                                if (!dependencyProject && eventPath.endsWith("pom.xml")) {
-                                    copyDependencies(model);
+                                if (!watchableDirectory.isDependencyProject() && eventPath.endsWith("pom.xml")) {
+                                    copyDependencies(watchableDirectory.getMavenModel());
                                 }
                             } catch (IOException | MojoExecutionException ex) {
                                 ex.printStackTrace();
@@ -217,7 +225,7 @@ public class StartupListener implements ServletContextListener {
         return model.getArtifactId();
     }
 
-    Path determineTarget(Path filePath) {
+    Path determineTarget(Path filePath, Path projectPath) {
         if (filePath.toString().contains("src" + File.separator + "main" + File.separator + "webapp")) {
         	Path pathWithinProject = projectPath.resolve("src/main/webapp").relativize(filePath);
             return webappPath.resolve(pathWithinProject);
@@ -307,4 +315,47 @@ public class StartupListener implements ServletContextListener {
     public void setWatcher(WatchService watcher) {
 		this.watcher = watcher;
 	}
+    
+    public static class WatchableDirectory {
+    	private Path directory;
+    	private Path projectPath;
+    	private boolean dependencyProject;
+    	private Model mavenModel;
+    	
+		public WatchableDirectory(Path dir, Path projectPath, boolean dependencyProject, Model mavenModel) {
+			super();
+			this.directory = dir;
+			this.projectPath = projectPath;
+			this.dependencyProject = dependencyProject;
+			this.mavenModel = mavenModel;
+		}
+		
+		public boolean isDependencyProject() {
+			return dependencyProject;
+		}
+		public void setDependencyProject(boolean dependencyProject) {
+			this.dependencyProject = dependencyProject;
+		}
+		public Path getProjectPath() {
+			return projectPath;
+		}
+		public void setProjectPath(Path projectPath) {
+			this.projectPath = projectPath;
+		}
+		public Path getDirectory() {
+			return directory;
+		}
+		public void setDirectory(Path dir) {
+			this.directory = dir;
+		}
+
+		public Model getMavenModel() {
+			return mavenModel;
+		}
+
+		public void setMavenModel(Model mavenModel) {
+			this.mavenModel = mavenModel;
+		}
+    }
+    
 }
