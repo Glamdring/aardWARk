@@ -1,15 +1,5 @@
 package bg.bozho.aardwark;
 
-import static org.twdata.maven.mojoexecutor.MojoExecutor.artifactId;
-import static org.twdata.maven.mojoexecutor.MojoExecutor.configuration;
-import static org.twdata.maven.mojoexecutor.MojoExecutor.element;
-import static org.twdata.maven.mojoexecutor.MojoExecutor.executeMojo;
-import static org.twdata.maven.mojoexecutor.MojoExecutor.executionEnvironment;
-import static org.twdata.maven.mojoexecutor.MojoExecutor.goal;
-import static org.twdata.maven.mojoexecutor.MojoExecutor.groupId;
-import static org.twdata.maven.mojoexecutor.MojoExecutor.name;
-import static org.twdata.maven.mojoexecutor.MojoExecutor.plugin;
-import static org.twdata.maven.mojoexecutor.MojoExecutor.version;
 import hudson.maven.MavenEmbedder;
 import hudson.maven.MavenRequest;
 
@@ -43,10 +33,6 @@ import javax.servlet.ServletContextEvent;
 import javax.servlet.ServletContextListener;
 import javax.servlet.annotation.WebListener;
 
-import org.apache.maven.execution.DefaultMavenExecutionRequest;
-import org.apache.maven.execution.DefaultMavenExecutionResult;
-import org.apache.maven.execution.MavenExecutionRequest;
-import org.apache.maven.execution.MavenExecutionResult;
 import org.apache.maven.execution.MavenSession;
 import org.apache.maven.model.Dependency;
 import org.apache.maven.model.Model;
@@ -56,19 +42,15 @@ import org.apache.maven.plugin.BuildPluginManager;
 import org.apache.maven.plugin.DefaultBuildPluginManager;
 import org.apache.maven.plugin.MojoExecutionException;
 import org.apache.maven.project.MavenProject;
-import org.apache.maven.shared.invoker.DefaultInvocationRequest;
-import org.apache.maven.shared.invoker.DefaultInvoker;
-import org.apache.maven.shared.invoker.InvocationRequest;
-import org.apache.maven.shared.invoker.Invoker;
-import org.codehaus.plexus.DefaultPlexusContainer;
-import org.codehaus.plexus.PlexusContainer;
 import org.codehaus.plexus.util.xml.Xpp3Dom;
 import org.codehaus.plexus.util.xml.pull.XmlPullParserException;
-import org.sonatype.aether.RepositorySystemSession;
-import org.sonatype.aether.util.DefaultRepositorySystemSession;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 @WebListener
 public class StartupListener implements ServletContextListener {
+
+    private static final Logger logger = LoggerFactory.getLogger(StartupListener.class);
 
     private ExecutorService executor;
     private BuildPluginManager pluginManager = new DefaultBuildPluginManager();
@@ -104,7 +86,7 @@ public class StartupListener implements ServletContextListener {
             // also watch dependent projects that are within the same workspace,
             // so that their classes are copied as well (rather than their
             // jars). TODO remove these jars from the copied dependencies
-            // adding only the artifactId (rather than groupId+artifactId) as
+            // Adding only the artifactId (rather than groupId+artifactId) as
             // groupIds tend to be variables, and we can't resolve variables
             // here. Might lead to inappropriate copies, but they can't do any
             // harm
@@ -177,12 +159,7 @@ public class StartupListener implements ServletContextListener {
                                 if (target != null) {
                                     if (event.kind() == StandardWatchEventKinds.ENTRY_CREATE
                                             || event.kind() == StandardWatchEventKinds.ENTRY_MODIFY) {
-                                        target.toFile().mkdirs(); // make sure
-                                                                  // the
-                                                                  // directory
-                                                                  // structure
-                                                                  // is in
-                                                                  // place
+                                        target.toFile().mkdirs(); // make sure the directory structure is in place
                                         Files.copy(eventPath, target, StandardCopyOption.REPLACE_EXISTING);
                                     }
                                     if (event.kind() == StandardWatchEventKinds.ENTRY_DELETE) {
@@ -194,31 +171,28 @@ public class StartupListener implements ServletContextListener {
                                     copyDependencies(watchableDirectory.getMavenModel());
                                 }
                             } catch (IOException | MojoExecutionException ex) {
-                                ex.printStackTrace();
-                                // TODO warn
+                                logger.warn("Exception when attempting to watch directory", ex);
                             }
                         }
                     }
                 } catch (InterruptedException ex) {
-                    ex.printStackTrace();
-                    // TODO warn
+                    logger.warn("Watching thread interrupted", ex);
                     // return - the executor has been shutdown
                 }
             }
         });
     }
 
-    private Model readMavenModel(String projectDir) throws FileNotFoundException, IOException {
-        Model model = null;
+    private Model readMavenModel(String baseDir) throws FileNotFoundException, IOException {
         Reader reader = null;
         try {
-            Path pomPath = fs.getPath(projectDir, "pom.xml");
+            Path pomPath = fs.getPath(baseDir, "pom.xml");
             if (!pomPath.toFile().exists()) {
                 return null;
             }
             reader = new FileReader(pomPath.toFile());
             MavenXpp3Reader xpp3Reader = new MavenXpp3Reader();
-            model = xpp3Reader.read(reader);
+            return xpp3Reader.read(reader);
         } catch (XmlPullParserException e) {
             throw new IllegalStateException("Cannot read maven model");
         } finally {
@@ -226,7 +200,6 @@ public class StartupListener implements ServletContextListener {
                 reader.close();
             }
         }
-        return model;
     }
 
     private String getTargetWebapp(Model model) {
@@ -258,46 +231,49 @@ public class StartupListener implements ServletContextListener {
     private void copyDependencies(Model model) throws IOException, MojoExecutionException {
         MavenProject project = new MavenProject(model);
         MavenRequest req = new MavenRequest();
-        req.setBaseDirectory(project.getBasedir().getAbsolutePath());
+        req.setBaseDirectory(projectPath.toString());
         req.setGoals(Collections.singletonList("dependency:copy-dependencies"));
-
         MavenSession session = null;
 
-        MavenEmbedder embedder = null;
-        try {
-            embedder = new MavenEmbedder(getClass().getClassLoader(), req);
-            embedder.execute(req);
-            PlexusContainer container = new DefaultPlexusContainer();
-            RepositorySystemSession repoSession = new DefaultRepositorySystemSession();
-            MavenExecutionRequest request = new DefaultMavenExecutionRequest();
-            MavenExecutionResult result = new DefaultMavenExecutionResult().setProject(project);
-            session = new MavenSession(container, repoSession, request, result);
-        } catch (Exception e) {
-            throw new IllegalStateException(e);
-        }
-
         Path lib = webappPath.resolve("WEB-INF/lib");
+        System.setProperty("MAVEN_OPTS", "-DoutputDirectory=" + lib.toString());
+
         File[] libs = lib.toFile().listFiles();
         for (File libFile : libs) {
             libFile.delete();
         }
 
-        InvocationRequest request = new DefaultInvocationRequest();
-        request.setPomFile(projectPath.resolve("pom.xml").toFile());
-        request.setBaseDirectory(projectPath.toFile());
-        request.setGoals(Collections.singletonList("dependency:copy-dependencies"));
-        request.setMavenOpts("-DoutputDirectory=" + lib.toString());
-
-        Invoker invoker = new DefaultInvoker();
+        MavenEmbedder embedder = null;
         try {
-            invoker.execute(request);
-        } catch (Exception ex) {
-            ex.printStackTrace();
+            embedder = new MavenEmbedder(getClass().getClassLoader(), req);
+            embedder.execute(req);
+            //PlexusContainer container = new DefaultPlexusContainer();
+            //RepositorySystemSession repoSession = new DefaultRepositorySystemSession();
+            //MavenExecutionRequest request = new DefaultMavenExecutionRequest();
+            //MavenExecutionResult result = new DefaultMavenExecutionResult().setProject(project);
+            //session = new MavenSession(container, repoSession, request, result);
+        } catch (Exception e) {
+            throw new IllegalStateException(e);
         }
 
-        executeMojo(plugin(groupId("org.apache.maven.plugins"), artifactId("maven-dependency-plugin"), version("2.8")),
-                goal("copy-dependencies"), configuration(element(name("outputDirectory"), lib.toString())),
-                executionEnvironment(project, session, pluginManager));
+
+
+//        InvocationRequest request = new DefaultInvocationRequest();
+//        request.setPomFile(projectPath.resolve("pom.xml").toFile());
+//        request.setBaseDirectory(projectPath.toFile());
+//        request.setGoals(Collections.singletonList("dependency:copy-dependencies"));
+//        request.setMavenOpts("-DoutputDirectory=" + lib.toString());
+//
+//        Invoker invoker = new DefaultInvoker();
+//        try {
+//            invoker.execute(request);
+//        } catch (Exception ex) {
+//            ex.printStackTrace();
+//        }
+//
+//        executeMojo(plugin(groupId("org.apache.maven.plugins"), artifactId("maven-dependency-plugin"), version("2.8")),
+//                goal("copy-dependencies"), configuration(element(name("outputDirectory"), lib.toString())),
+//                executionEnvironment(project, session, pluginManager));
     }
 
     public void contextDestroyed(ServletContextEvent sce) {
