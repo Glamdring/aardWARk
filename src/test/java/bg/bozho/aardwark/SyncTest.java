@@ -4,6 +4,7 @@ import java.nio.file.FileSystem;
 import java.nio.file.FileSystems;
 import java.nio.file.Path;
 import java.nio.file.WatchService;
+import java.util.Arrays;
 import java.util.HashSet;
 import java.util.Set;
 
@@ -11,8 +12,6 @@ import org.apache.maven.model.Model;
 import org.junit.Assert;
 import org.junit.Test;
 import org.mockito.Mockito;
-
-import com.google.common.collect.Lists;
 
 public class SyncTest {
 
@@ -42,7 +41,7 @@ public class SyncTest {
         Set<String> dependencies = new HashSet<>();
         dependencies.add("another");
         Model model = new Model();
-        model.setModules(Lists.newArrayList("another"));
+        model.setModules(Arrays.asList("another"));
         listener.watchDependentProjects(model, dependencies, fs.getPath("/workspace/foo/another"));
         // one direct invocation + one invocation for the dependent project
         // "another"
