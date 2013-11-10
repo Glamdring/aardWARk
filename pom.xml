@@ -24,13 +24,6 @@
             <artifactId>javax.servlet-api</artifactId>
             <version>3.1.0</version>
         </dependency>
-        <!-- dependency> <groupId>org.twdata.maven</groupId> <artifactId>mojo-executor</artifactId>
-            <version>2.1.0</version> </dependency -->
-        <dependency>
-            <groupId>org.apache.maven.shared</groupId>
-            <artifactId>maven-invoker</artifactId>
-            <version>2.1.1</version>
-        </dependency>
         <dependency>
             <groupId>org.slf4j</groupId>
             <artifactId>slf4j-api</artifactId>
@@ -40,11 +33,6 @@
             <groupId>ch.qos.logback</groupId>
             <artifactId>logback-classic</artifactId>
             <version>1.0.13</version>
-        </dependency>
-        <dependency>
-            <groupId>org.jenkins-ci.lib</groupId>
-            <artifactId>lib-jenkins-maven-embedder</artifactId>
-            <version>3.11</version>
         </dependency>
         <dependency>
             <groupId>junit</groupId>
