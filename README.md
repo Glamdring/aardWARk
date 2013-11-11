@@ -13,3 +13,9 @@ Allows easy syncing of a maven project with a servlet container. How?
 3. Start your servlet container - everything (classes, resources, jars) will be synced whenever you make a change in your IDE. Note: jar files will be synchronized only on startup and after a successful build of your maven project.
 
 The project is servlet-container-independent and IDE-independent.
+
+_Note_: the purpose of the project is to sync the classes and resources of your projects between your workspace and the servlet container. Reloading the classes is beyond the scope of this project. For that to work you have a couple of options:
+
+* Regular <a href="http://docs.oracle.com/javase/1.4.2/docs/guide/jpda/enhancements.html">HotSwap</a> - simply run the servlet container in debug mode
+* <a href="http://ssw.jku.at/dcevm/">DCEVM</a> - a VM enhancement that allows complete reloading of classes
+* JRebel - a commercial alternative
