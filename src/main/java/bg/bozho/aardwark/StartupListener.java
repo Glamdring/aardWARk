@@ -5,6 +5,7 @@ import java.io.FileNotFoundException;
 import java.io.FileReader;
 import java.io.IOException;
 import java.io.Reader;
+import java.nio.charset.Charset;
 import java.nio.file.FileSystem;
 import java.nio.file.FileSystems;
 import java.nio.file.FileVisitResult;
@@ -17,6 +18,7 @@ import java.nio.file.WatchEvent;
 import java.nio.file.WatchKey;
 import java.nio.file.WatchService;
 import java.nio.file.attribute.BasicFileAttributes;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -46,8 +48,8 @@ public class StartupListener implements ServletContextListener {
     private ExecutorService executor;
     private WatchService watcher;
     private FileSystem fs = FileSystems.getDefault();
-    private Path webappPath;
-    private Path projectPath;
+    private Map<String, Path> webappPaths = new HashMap<>();
+    private Map<String, Path> projectPaths = new HashMap<>();
     // a map holding mapping from watch keys to paths and related metadata,
     // because each WatchEvent contains only the file name, and not the path to
     // the file
@@ -60,57 +62,79 @@ public class StartupListener implements ServletContextListener {
 
     public void contextInitialized(ServletContextEvent sce) {
 
-        String projectDir = sce.getServletContext().getContextPath().replace("/aardwark-", "")
-                .replace('.', '/');
+        // supporting multiple projects
+        List<String> projectDirs = getProjectDirectories(sce);
 
-        try {
-            Model model = readMavenModel(projectDir);
+        for (String projectDir : projectDirs) {
+            try {
+                Model model = readMavenModel(projectDir);
 
-            watcher = fs.newWatchService();
-            projectPath = fs.getPath(projectDir);
-            webappPath = fs.getPath(sce.getServletContext().getRealPath("/")).getParent()
-                    .resolve(getTargetWebapp(model));
+                watcher = fs.newWatchService();
+                String webappName = getTargetWebapp(model);
+                Path projectPath = fs.getPath(projectDir);
+                projectPaths.put(webappName, projectPath);
+                Path webappPath = fs.getPath(sce.getServletContext().getRealPath("/")).getParent().resolve(webappName);
+                webappPaths.put(webappName, webappPath);
 
-            // if the webapp does not exist, assume ROOT is used
-            if (!webappPath.toFile().exists()) {
-                logger.warn("No webapp found under " + webappPath.toString() + ". Using ROOT instead.");
-                webappPath = webappPath.getParent().resolve("ROOT");
+                // if the webapp does not exist, assume ROOT is used
+                if (Files.notExists(webappPath)) {
+                    logger.warn("No webapp found under " + webappPath.toString() + ". Using ROOT instead.");
+                    webappPath = webappPath.getParent().resolve("ROOT");
+                }
+
+                executor = Executors.newSingleThreadExecutor();
+
+                // copy once on startup
+                copyDependencies(webappName, model);
+
+                watchProject(webappName, projectPath, model, false);
+
+                // also watch dependent projects that are within the same workspace,
+                // so that their classes are copied as well (rather than their
+                // jars). TODO remove these jars from the copied dependencies?
+                // Adding only the artifactId (rather than groupId+artifactId) as
+                // groupIds tend to be variables, and we can't resolve variables
+                // here. Might lead to inappropriate copies, but they can't do any
+                // harm
+                Set<String> dependencies = new HashSet<>();
+                for (Dependency dependency : model.getDependencies()) {
+                    dependencies.add(dependency.getArtifactId());
+                }
+                Path currentPath = projectPath;
+                Model currentModel = model;
+                while (currentModel != null) {
+                    currentPath = currentPath.getParent();
+                    Model currentProjectModel = readMavenModel(currentPath.toString());
+                    watchDependentProjects(webappName, currentProjectModel, dependencies, currentPath);
+                    currentModel = currentProjectModel;
+                }
+
+                startWatching();
+            } catch (IOException e) {
+                throw new IllegalStateException("Failed to watch file system", e);
             }
-
-            executor = Executors.newSingleThreadExecutor();
-
-            // copy once on startup
-            copyDependencies(model);
-
-            watchProject(projectPath, model, false);
-
-            // also watch dependent projects that are within the same workspace,
-            // so that their classes are copied as well (rather than their
-            // jars). TODO remove these jars from the copied dependencies
-            // Adding only the artifactId (rather than groupId+artifactId) as
-            // groupIds tend to be variables, and we can't resolve variables
-            // here. Might lead to inappropriate copies, but they can't do any
-            // harm
-            Set<String> dependencies = new HashSet<>();
-            for (Dependency dependency : model.getDependencies()) {
-                dependencies.add(dependency.getArtifactId());
-            }
-            Path currentPath = projectPath;
-            Model currentModel = model;
-            while (currentModel != null) {
-                currentPath = currentPath.getParent();
-                Model currentProjectModel = readMavenModel(currentPath.toString());
-                watchDependentProjects(currentProjectModel, dependencies, currentPath);
-                currentModel = currentProjectModel;
-            }
-
-            startWatching();
-        } catch (IOException e) {
-            throw new IllegalStateException("Failed to watch file system", e);
         }
     }
 
-    void watchDependentProjects(Model model, Set<String> dependencies, Path projectPath) throws IOException {
+    private List<String> getProjectDirectories(ServletContextEvent sce) {
+        // if there's a properties file, read it and determine the target project path
+        Path webappsDirectory = fs.getPath(sce.getServletContext().getRealPath("/")).getParent();
+        Path propertiesFile = webappsDirectory.resolve("aardwark.properties");
+        if (Files.exists(propertiesFile)) {
+           try {
+                List<String> lines = Files.readAllLines(propertiesFile, Charset.forName("UTF-8"));
+                if (!lines.isEmpty()) {
+                    return lines;
+                }
+           } catch (IOException e) {
+               throw new IllegalStateException(e);
+           }
+        }
+        // default to the war filename
+        return Arrays.asList(sce.getServletContext().getContextPath().replace("/aardwark-", "").replace('.', '/'));
+    }
+
+    void watchDependentProjects(String webappName, Model model, Set<String> dependencies, Path projectPath) throws IOException {
         if (model == null) {
             return;
         }
@@ -118,18 +142,18 @@ public class StartupListener implements ServletContextListener {
         List<String> modules = model.getModules();
         if ((modules == null || modules.isEmpty())) {
             if (dependencies.contains(model.getArtifactId())) {
-                watchProject(projectPath, null, true);
+                watchProject(webappName, projectPath, null, true);
             }
         } else {
             for (String module : modules) {
                 Path modulePath = projectPath.resolve(module);
                 Model moduleModel = readMavenModel(modulePath.toString());
-                watchDependentProjects(moduleModel, dependencies, modulePath);
+                watchDependentProjects(webappName, moduleModel, dependencies, modulePath);
             }
         }
     }
 
-    private void watchProject(final Path projectPath, final Model model, final boolean dependencyProject)
+    private void watchProject(final String webappName, final Path projectPath, final Model model, final boolean dependencyProject)
             throws IOException {
 
         Files.walkFileTree(projectPath, new SimpleFileVisitor<Path>() {
@@ -137,7 +161,7 @@ public class StartupListener implements ServletContextListener {
             public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) throws IOException {
                 WatchKey key = dir.register(watcher, StandardWatchEventKinds.ENTRY_CREATE,
                         StandardWatchEventKinds.ENTRY_MODIFY, StandardWatchEventKinds.ENTRY_DELETE);
-                watched.put(key, new WatchableDirectory(dir, projectPath, dependencyProject, model));
+                watched.put(key, new WatchableDirectory(dir, projectPath, dependencyProject, model, webappName));
                 return FileVisitResult.CONTINUE;
             }
         });
@@ -156,7 +180,7 @@ public class StartupListener implements ServletContextListener {
                                 WatchableDirectory watchableDirectory = watched.get(key);
                                 Path filename = (Path) event.context();
                                 Path eventPath = watchableDirectory.getDirectory().resolve(filename);
-                                Path target = determineTarget(eventPath, watchableDirectory.getProjectPath());
+                                Path target = determineTarget(watchableDirectory.getWebappName(), eventPath, watchableDirectory.getProjectPath());
                                 if (target != null) {
                                     if (event.kind() == StandardWatchEventKinds.ENTRY_CREATE
                                             || event.kind() == StandardWatchEventKinds.ENTRY_MODIFY) {
@@ -165,13 +189,8 @@ public class StartupListener implements ServletContextListener {
                                         Files.copy(eventPath, target, StandardCopyOption.REPLACE_EXISTING);
                                     }
                                     if (event.kind() == StandardWatchEventKinds.ENTRY_DELETE) {
-                                        Files.deleteIfExists(determineTarget(eventPath,
-                                                watchableDirectory.getProjectPath()));
+                                        Files.deleteIfExists(determineTarget(watchableDirectory.getWebappName(), eventPath, watchableDirectory.getProjectPath()));
                                     }
-                                }
-                                if (!watchableDirectory.isDependencyProject()
-                                        && eventPath.endsWith("pom.xml")) {
-                                    copyDependencies(watchableDirectory.getMavenModel());
                                 }
                             } catch (IOException ex) {
                                 logger.warn("Exception when attempting to watch directory", ex);
@@ -190,7 +209,7 @@ public class StartupListener implements ServletContextListener {
         Reader reader = null;
         try {
             Path pomPath = fs.getPath(baseDir, "pom.xml");
-            if (!pomPath.toFile().exists()) {
+            if (Files.notExists(pomPath)) {
                 return null;
             }
             reader = new FileReader(pomPath.toFile());
@@ -218,21 +237,21 @@ public class StartupListener implements ServletContextListener {
         return model.getArtifactId();
     }
 
-    Path determineTarget(Path filePath, Path projectPath) {
+    Path determineTarget(String webappName, Path filePath, Path projectPath) {
         if (filePath.toString().contains("src" + File.separator + "main" + File.separator + "webapp")) {
             Path pathWithinProject = projectPath.resolve("src/main/webapp").relativize(filePath);
-            return webappPath.resolve(pathWithinProject);
+            return webappPaths.get(webappName).resolve(pathWithinProject);
         }
         if (filePath.toString().contains("target" + File.separator + "classes")) {
             Path pathWithinClasspath = projectPath.resolve("target/classes").relativize(filePath);
-            return webappPath.resolve("WEB-INF/classes").resolve(pathWithinClasspath);
+            return webappPaths.get(webappName).resolve("WEB-INF/classes").resolve(pathWithinClasspath);
         }
 
         return null;
     }
 
-    private void copyDependencies(Model model) throws IOException {
-        final Path lib = webappPath.resolve("WEB-INF/lib");
+    private void copyDependencies(String webappName, Model model) throws IOException {
+        final Path lib = webappPaths.get(webappName).resolve("WEB-INF/lib");
         lib.toFile().mkdirs();
         File[] libs = lib.toFile().listFiles();
         if (libs != null) {
@@ -241,7 +260,7 @@ public class StartupListener implements ServletContextListener {
             }
         }
         // get the lib folder, where all dependencies are located after a successful build
-        Path libFolder = projectPath.resolve("target/" + model.getArtifactId() + "-" + model.getVersion() + "/WEB-INF/lib");
+        Path libFolder = projectPaths.get(webappName).resolve("target/" + model.getArtifactId() + "-" + model.getVersion() + "/WEB-INF/lib");
         Files.walkFileTree(libFolder, new SimpleFileVisitor<Path>() {
             @Override
             public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
@@ -260,12 +279,12 @@ public class StartupListener implements ServletContextListener {
         executor.shutdownNow();
     }
 
-    public void setProjectPath(Path projectPath) {
-        this.projectPath = projectPath;
+    public void addProjectPath(String webappName, Path projectPath) {
+        this.projectPaths.put(webappName, projectPath);
     }
 
-    public void setWebappPath(Path webappPath) {
-        this.webappPath = webappPath;
+    public void addWebappPath(String webappName, Path webappPath) {
+        this.webappPaths.put(webappName, webappPath);
     }
 
     public void setWatcher(WatchService watcher) {
@@ -277,13 +296,15 @@ public class StartupListener implements ServletContextListener {
         private Path projectPath;
         private boolean dependencyProject;
         private Model mavenModel;
+        private String webappName;
 
-        public WatchableDirectory(Path dir, Path projectPath, boolean dependencyProject, Model mavenModel) {
+        public WatchableDirectory(Path dir, Path projectPath, boolean dependencyProject, Model mavenModel, String webappName) {
             super();
             this.directory = dir;
             this.projectPath = projectPath;
             this.dependencyProject = dependencyProject;
             this.mavenModel = mavenModel;
+            this.webappName = webappName;
         }
 
         public boolean isDependencyProject() {
@@ -317,6 +338,13 @@ public class StartupListener implements ServletContextListener {
         public void setMavenModel(Model mavenModel) {
             this.mavenModel = mavenModel;
         }
-    }
 
+        public String getWebappName() {
+            return webappName;
+        }
+
+        public void setWebappName(String webappName) {
+            this.webappName = webappName;
+        }
+    }
 }

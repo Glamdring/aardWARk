@@ -20,9 +20,9 @@ public class SyncTest {
         FileSystem fs = FileSystems.getDefault();
         StartupListener listener = new StartupListener();
         Path projectPath = fs.getPath("/workspace/foo/bar");
-        listener.setProjectPath(projectPath);
-        listener.setWebappPath(fs.getPath("/tomcat/webapps/bar"));
-        Path target = listener.determineTarget(fs.getPath("/workspace/foo/bar/target/classes/bg/bozho/Some.class"),
+        listener.addProjectPath("bar", projectPath);
+        listener.addWebappPath("bar", fs.getPath("/tomcat/webapps/bar"));
+        Path target = listener.determineTarget("bar", fs.getPath("/workspace/foo/bar/target/classes/bg/bozho/Some.class"),
                 projectPath);
         // replacing "\" with "/", so that the test works on both OSs
         Assert.assertEquals("/tomcat/webapps/bar/WEB-INF/classes/bg/bozho/Some.class",
@@ -33,8 +33,8 @@ public class SyncTest {
     public void watchDependentProjectsTest() throws Exception {
         FileSystem fs = FileSystems.getDefault();
         StartupListener listener = new StartupListener();
-        listener.setProjectPath(fs.getPath("/workspace/foo/bar"));
-        listener.setWebappPath(fs.getPath("/tomcat/webapps/bar"));
+        listener.addProjectPath("bar", fs.getPath("/workspace/foo/bar"));
+        listener.addWebappPath("bar", fs.getPath("/tomcat/webapps/bar"));
         WatchService watcher = Mockito.mock(WatchService.class);
         listener.setWatcher(watcher);
         listener = Mockito.spy(listener);
@@ -42,10 +42,10 @@ public class SyncTest {
         dependencies.add("another");
         Model model = new Model();
         model.setModules(Arrays.asList("another"));
-        listener.watchDependentProjects(model, dependencies, fs.getPath("/workspace/foo/another"));
+        listener.watchDependentProjects("another", model, dependencies, fs.getPath("/workspace/foo/another"));
         // one direct invocation + one invocation for the dependent project
         // "another"
-        Mockito.verify(listener, Mockito.times(2)).watchDependentProjects(Mockito.<Model> any(),
+        Mockito.verify(listener, Mockito.times(2)).watchDependentProjects(Mockito.anyString(), Mockito.<Model> any(),
                 Mockito.<Set<String>> any(), Mockito.<Path> any());
     }
 }
