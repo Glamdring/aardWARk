@@ -162,11 +162,15 @@ public class StartupListener implements ServletContextListener {
                                             || event.kind() == StandardWatchEventKinds.ENTRY_MODIFY) {
                                         // make sure directory structure is in place
                                         target.toFile().mkdirs();
-                                        Files.copy(eventPath, target, StandardCopyOption.REPLACE_EXISTING);
+                                        if (!target.toFile().isDirectory()) {
+                                            Files.copy(eventPath, target, StandardCopyOption.REPLACE_EXISTING);
+                                        }
                                     }
                                     if (event.kind() == StandardWatchEventKinds.ENTRY_DELETE) {
-                                        Files.deleteIfExists(determineTarget(eventPath,
-                                                watchableDirectory.getProjectPath()));
+                                        if (!target.toFile().isDirectory()) {
+                                            Files.deleteIfExists(determineTarget(eventPath,
+                                                    watchableDirectory.getProjectPath()));
+                                        }
                                     }
                                 }
                                 if (!watchableDirectory.isDependencyProject()
@@ -174,7 +178,7 @@ public class StartupListener implements ServletContextListener {
                                     copyDependencies(watchableDirectory.getMavenModel());
                                 }
                             } catch (IOException ex) {
-                                logger.warn("Exception when attempting to watch directory", ex);
+                                logger.warn("Exception while watching directory", ex);
                             }
                         }
                     }
