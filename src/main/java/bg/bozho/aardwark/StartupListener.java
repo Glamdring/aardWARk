@@ -182,18 +182,19 @@ public class StartupListener implements ServletContextListener {
                                 Path eventPath = watchableDirectory.getDirectory().resolve(filename);
                                 Path target = determineTarget(watchableDirectory.getWebappName(), eventPath, watchableDirectory.getProjectPath());
                                 if (target != null) {
-                                    if (event.kind() == StandardWatchEventKinds.ENTRY_CREATE
-                                            || event.kind() == StandardWatchEventKinds.ENTRY_MODIFY) {
+                                    if (event.kind() == StandardWatchEventKinds.ENTRY_CREATE || event.kind() == StandardWatchEventKinds.ENTRY_MODIFY) {
                                         // make sure directory structure is in place
                                         target.toFile().mkdirs();
-                                        Files.copy(eventPath, target, StandardCopyOption.REPLACE_EXISTING);
+                                        if (!Files.isDirectory(target)) {
+                                            Files.copy(eventPath, target, StandardCopyOption.REPLACE_EXISTING);
+                                        }
                                     }
-                                    if (event.kind() == StandardWatchEventKinds.ENTRY_DELETE) {
+                                    if (event.kind() == StandardWatchEventKinds.ENTRY_DELETE && !Files.isDirectory(target)) {
                                         Files.deleteIfExists(determineTarget(watchableDirectory.getWebappName(), eventPath, watchableDirectory.getProjectPath()));
                                     }
                                 }
                             } catch (IOException ex) {
-                                logger.warn("Exception when attempting to watch directory", ex);
+                                logger.warn("Exception while watching directory", ex);
                             }
                         }
                     }
