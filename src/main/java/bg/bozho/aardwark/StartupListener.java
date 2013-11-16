@@ -31,6 +31,7 @@ import javax.servlet.ServletContextEvent;
 import javax.servlet.ServletContextListener;
 import javax.servlet.annotation.WebListener;
 
+import org.apache.commons.io.FileUtils;
 import org.apache.maven.model.Dependency;
 import org.apache.maven.model.Model;
 import org.apache.maven.model.Plugin;
@@ -87,6 +88,8 @@ public class StartupListener implements ServletContextListener {
                 // copy once on startup
                 copyDependencies(webappName, model);
 
+                copyClassesAndResources(webappName, model);
+
                 watchProject(webappName, projectPath, model, false);
 
                 // also watch dependent projects that are within the same workspace,
@@ -114,6 +117,13 @@ public class StartupListener implements ServletContextListener {
                 throw new IllegalStateException("Failed to watch file system", e);
             }
         }
+    }
+
+    private void copyClassesAndResources(String webappName, Model model) throws IOException {
+        Path projectPath = projectPaths.get(webappName);
+        Path webappPath = webappPaths.get(webappName);
+        FileUtils.copyDirectory(projectPath.resolve("target/classes").toFile(), webappPath.resolve("WEB-INF/classes").toFile());
+        FileUtils.copyDirectory(projectPath.resolve("src/main/webapp").toFile(), webappPath.toFile());
     }
 
     private List<String> getProjectDirectories(ServletContextEvent sce) {
