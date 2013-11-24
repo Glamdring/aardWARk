@@ -185,9 +185,9 @@ public class StartupListener implements ServletContextListener {
                     WatchKey key;
                     while ((key = watcher.take()) != null) {
                         List<WatchEvent<?>> events = key.pollEvents();
+                        WatchableDirectory watchableDirectory = watched.get(key);
                         for (WatchEvent<?> event : events) {
                             try {
-                                WatchableDirectory watchableDirectory = watched.get(key);
                                 Path filename = (Path) event.context();
                                 Path eventPath = watchableDirectory.getDirectory().resolve(filename);
                                 Path target = determineTarget(watchableDirectory.getWebappName(), eventPath, watchableDirectory.getProjectPath());
@@ -207,10 +207,15 @@ public class StartupListener implements ServletContextListener {
                                 logger.warn("Exception while watching directory", ex);
                             }
                         }
+                        if (!key.reset()) { // reset, in order to receive further events
+                            watched.remove(key); // the directory is no longer accessible
+                        }
                     }
                 } catch (InterruptedException ex) {
                     logger.warn("Watching thread interrupted", ex);
                     // return - the executor has been shutdown
+                } catch (Exception ex) {
+                    logger.error("Exception occurred", ex);
                 }
             }
         });
@@ -287,7 +292,9 @@ public class StartupListener implements ServletContextListener {
         } catch (Exception e) {
             e.printStackTrace();
         }
-        executor.shutdownNow();
+        if (executor != null) {
+            executor.shutdownNow();
+        }
     }
 
     public void addProjectPath(String webappName, Path projectPath) {
