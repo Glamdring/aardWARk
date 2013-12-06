@@ -72,7 +72,14 @@ public class StartupListener implements ServletContextListener {
         for (String projectDir : projectDirs) {
             try {
                 Model model = readMavenModel(projectDir);
-
+                
+                if (model == null) {
+                    logger.error("No maven project found under path " + projectDir +
+                            ". Make sure you have configured aardWARk properly " +
+                            "(by setting the path in the war name, after aardwark-, " +
+                            "or via a propertie sfile) and also that the target directory exists");
+                    continue;
+                }
                 watcher = fs.newWatchService();
                 String webappName = getTargetWebapp(model);
                 Path projectPath = fs.getPath(projectDir);
