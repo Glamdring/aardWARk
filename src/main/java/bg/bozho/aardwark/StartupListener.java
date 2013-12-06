@@ -1,9 +1,11 @@
 package bg.bozho.aardwark;
 
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.FileReader;
 import java.io.IOException;
+import java.io.PrintStream;
 import java.io.Reader;
 import java.nio.charset.Charset;
 import java.nio.file.FileSystem;
@@ -32,6 +34,7 @@ import javax.servlet.ServletContextListener;
 import javax.servlet.annotation.WebListener;
 
 import org.apache.commons.io.FileUtils;
+import org.apache.maven.cli.MavenCli;
 import org.apache.maven.model.Dependency;
 import org.apache.maven.model.Model;
 import org.apache.maven.model.Plugin;
@@ -275,15 +278,19 @@ public class StartupListener implements ServletContextListener {
                 libFile.delete();
             }
         }
-        // get the lib folder, where all dependencies are located after a successful build
-        Path libFolder = projectPaths.get(webappName).resolve("target/" + model.getArtifactId() + "-" + model.getVersion() + "/WEB-INF/lib");
-        Files.walkFileTree(libFolder, new SimpleFileVisitor<Path>() {
-            @Override
-            public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
-                Files.copy(file, lib.resolve(file.getFileName()));
-                return FileVisitResult.CONTINUE;
-            }
-        });
+
+        logger.info("Copying maven dependencies");
+
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        PrintStream out = new PrintStream(baos);
+        MavenCli cli = new MavenCli();
+        cli.doMain(new String[] {"dependency:copy-dependencies", "-DoutputDirectory=" + lib.toString()}, projectPaths.get(webappName).toString(), out, out);
+        out.close();
+        String output = baos.toString("UTF-8");
+        if (output.contains("FAILURE")) {
+            logger.warn("Problem with copying dependencies: " + output);
+        }
+        logger.info("Copying dependencies successful");
     }
 
     public void contextDestroyed(ServletContextEvent sce) {
