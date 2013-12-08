@@ -197,7 +197,7 @@ public class StartupListener implements ServletContextListener {
                                 if (target != null) {
                                     if (event.kind() == StandardWatchEventKinds.ENTRY_CREATE || event.kind() == StandardWatchEventKinds.ENTRY_MODIFY) {
                                         // make sure directory structure is in place
-                                        target.toFile().mkdirs();
+                                        target.toFile().getParentFile().mkdirs();
                                         if (!Files.isDirectory(target)) {
                                             Files.copy(eventPath, target, StandardCopyOption.REPLACE_EXISTING);
                                         }
@@ -279,7 +279,7 @@ public class StartupListener implements ServletContextListener {
             }
         }
 
-        logger.info("Copying maven dependencies");
+        logger.info("Copying maven dependencies. This may take some time, as some dependencies may have to be downloaded from a remote repository.");
 
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
         PrintStream out = new PrintStream(baos);
