@@ -179,14 +179,19 @@ public class StartupListener implements ServletContextListener {
         Files.walkFileTree(projectPath, new SimpleFileVisitor<Path>() {
             @Override
             public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) throws IOException {
-                WatchKey key = dir.register(watcher, StandardWatchEventKinds.ENTRY_CREATE,
-                        StandardWatchEventKinds.ENTRY_MODIFY, StandardWatchEventKinds.ENTRY_DELETE);
-                watched.put(key, new WatchableDirectory(dir, projectPath, dependencyProject, model, webappName));
+                watchDirectory(webappName, projectPath, model, dependencyProject, dir);
                 return FileVisitResult.CONTINUE;
             }
         });
     }
-
+    
+    private void watchDirectory(final String webappName, final Path projectPath, final Model model,
+            final boolean dependencyProject, Path dir) throws IOException {
+        WatchKey key = dir.register(watcher, StandardWatchEventKinds.ENTRY_CREATE,
+                StandardWatchEventKinds.ENTRY_MODIFY, StandardWatchEventKinds.ENTRY_DELETE);
+        watched.put(key, new WatchableDirectory(dir, projectPath, dependencyProject, model, webappName));
+    }
+    
     private void startWatching() {
         executor.submit(new Runnable() {
             @Override
@@ -202,15 +207,25 @@ public class StartupListener implements ServletContextListener {
                                 Path eventPath = watchableDirectory.getDirectory().resolve(filename);
                                 Path target = determineTarget(watchableDirectory.getWebappName(), eventPath, watchableDirectory.getProjectPath());
                                 if (target != null) {
+                                    if (Files.isDirectory(eventPath) && event.kind() == StandardWatchEventKinds.ENTRY_MODIFY) {
+                                        continue; // skip MODIFY events for directories - they do not convey any information
+                                    }
+                                    if (Files.notExists(eventPath) && event.kind() == StandardWatchEventKinds.ENTRY_MODIFY) {
+                                        continue; // MODIFY may be triggered for deleted directories
+                                    }
                                     if (event.kind() == StandardWatchEventKinds.ENTRY_CREATE || event.kind() == StandardWatchEventKinds.ENTRY_MODIFY) {
-                                        // make sure directory structure is in place
-                                        target.toFile().mkdirs();
-                                        if (!Files.isDirectory(target)) {
+                                        if (!Files.isDirectory(eventPath)) {
+                                            // make sure directory structure is in place
+                                            target.getParent().toFile().mkdirs();
                                             Files.copy(eventPath, target, StandardCopyOption.REPLACE_EXISTING);
+                                        } else if (event.kind() == StandardWatchEventKinds.ENTRY_CREATE){
+                                            target.toFile().mkdirs();
+                                            // if this is a new directory, watch it as well
+                                            watchDirectory(watchableDirectory.getWebappName(), watchableDirectory.getProjectPath(), watchableDirectory.getMavenModel(), false, eventPath);
                                         }
                                     }
-                                    if (event.kind() == StandardWatchEventKinds.ENTRY_DELETE && !Files.isDirectory(target)) {
-                                        Files.deleteIfExists(determineTarget(watchableDirectory.getWebappName(), eventPath, watchableDirectory.getProjectPath()));
+                                    if (event.kind() == StandardWatchEventKinds.ENTRY_DELETE) {
+                                        Files.deleteIfExists(target);
                                     }
                                 }
                             } catch (IOException ex) {
