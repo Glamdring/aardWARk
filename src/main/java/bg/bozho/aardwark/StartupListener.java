@@ -102,6 +102,7 @@ public class StartupListener implements ServletContextListener {
                 executor = Executors.newSingleThreadExecutor();
 
                 // copy once on startup
+                // TODO pass model and check parent and dependent projects' poms for changes, in addition to the current project pom
                 if (dependencyCopyingNeeded(webappName, projectPath)) {
                     copyDependencies(webappName, model);
                 } else {
