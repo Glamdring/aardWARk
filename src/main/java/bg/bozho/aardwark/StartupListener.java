@@ -41,13 +41,19 @@ import org.apache.maven.model.Plugin;
 import org.apache.maven.model.io.xpp3.MavenXpp3Reader;
 import org.codehaus.plexus.util.xml.Xpp3Dom;
 import org.codehaus.plexus.util.xml.pull.XmlPullParserException;
+import org.joda.time.DateTime;
+import org.joda.time.format.DateTimeFormat;
+import org.joda.time.format.DateTimeFormatter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import com.google.common.collect.Lists;
 
 @WebListener
 public class StartupListener implements ServletContextListener {
 
     private static final Logger logger = LoggerFactory.getLogger(StartupListener.class);
+    private static final DateTimeFormatter dateTimeFormatter = DateTimeFormat.forPattern("HH:mm:ss dd.MM.yyyy");
 
     private ExecutorService executor;
     private WatchService watcher;
@@ -96,7 +102,11 @@ public class StartupListener implements ServletContextListener {
                 executor = Executors.newSingleThreadExecutor();
 
                 // copy once on startup
-                copyDependencies(webappName, model);
+                if (dependencyCopyingNeeded(webappName, projectPath)) {
+                    copyDependencies(webappName, model);
+                } else {
+                    logger.info("No need to copy project dependencies, as the pom file hasn't been modified since the last copy");
+                }
 
                 copyClassesAndResources(webappName, model);
 
@@ -127,6 +137,40 @@ public class StartupListener implements ServletContextListener {
                 throw new IllegalStateException("Failed to watch file system", e);
             }
         }
+    }
+
+    /**
+     * Determine if dependency copying is needed, by comparing the last modified date of the pom to the last dependency copy (stored in the tomcat temp dir)
+     * @param webappName
+     * @return true if dependencies should be copied.
+     */
+    private boolean dependencyCopyingNeeded(String webappName, Path projectPath) {
+        try {
+            Path metaFile = getDependencyCopyMetaFile(webappName);
+            List<String> lines = Files.readAllLines(metaFile, Charset.forName("UTF-8"));
+            if (!lines.isEmpty() && !lines.get(0).isEmpty()) {
+                DateTime lastCopy = dateTimeFormatter.parseDateTime(lines.get(0));
+                DateTime lastModified = new DateTime(Files.getLastModifiedTime(projectPath.resolve("pom.xml")).toMillis());
+                if (lastCopy.isBefore(lastModified)) {
+                    return true;
+                } else {
+                    return false;
+                }
+            } else {
+                return true;
+            }
+        } catch (IOException e) {
+            logger.warn("Cannot create temp file for tracking dependency copying. This may result in slower startup times", e);
+            return true;
+        }
+    }
+
+    private Path getDependencyCopyMetaFile(String webappName) throws IOException {
+        Path metaFile = fs.getPath(System.getProperty("java.io.tmpdir"), webappName + ".tmp");
+        if (Files.notExists(metaFile)) {
+            metaFile = Files.createTempFile(webappName, "tmp");
+        }
+        return metaFile;
     }
 
     private void copyClassesAndResources(String webappName, Model model) throws IOException {
@@ -313,6 +357,8 @@ public class StartupListener implements ServletContextListener {
             logger.warn("Problem with copying dependencies: " + output);
         }
         logger.info("Copying dependencies successful");
+        // 
+        Files.write(getDependencyCopyMetaFile(webappName), Lists.newArrayList(dateTimeFormatter.print(new DateTime())), Charset.forName("UTF-8"));
     }
 
     public void contextDestroyed(ServletContextEvent sce) {
