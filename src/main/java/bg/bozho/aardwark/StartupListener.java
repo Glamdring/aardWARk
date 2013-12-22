@@ -280,6 +280,12 @@ public class StartupListener implements ServletContextListener {
                         if (!key.reset()) { // reset, in order to receive further events
                             watched.remove(key); // the directory is no longer accessible
                         }
+                        // changes in files in dependency projects must trigger
+                        // dependency copy on next deploy, as the updated
+                        // classes will be packaged in new versions of the jars
+                        if (watchableDirectory.isDependencyProject()) {
+                            writeDependencyCopyNeeded(watchableDirectory.getWebappName());
+                        }
                     }
                 } catch (InterruptedException ex) {
                     logger.warn("Watching thread interrupted", ex);
@@ -358,7 +364,10 @@ public class StartupListener implements ServletContextListener {
             logger.warn("Problem with copying dependencies: " + output);
         }
         logger.info("Copying dependencies successful");
-        //
+        writeDependencyCopyNeeded(webappName);
+    }
+
+    private void writeDependencyCopyNeeded(String webappName) throws IOException {
         Files.write(getDependencyCopyMetaFile(webappName), Lists.newArrayList(dateTimeFormatter.print(new DateTime())), Charset.forName("UTF-8"));
     }
 
