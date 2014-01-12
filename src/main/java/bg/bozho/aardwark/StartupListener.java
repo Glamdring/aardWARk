@@ -232,6 +232,10 @@ public class StartupListener implements ServletContextListener {
 
     private void watchDirectory(final String webappName, final Path projectPath, final Model model,
             final boolean dependencyProject, Path dir) throws IOException {
+        // do not watch .settings, .svn, etc.
+        if (dir.getFileName().startsWith(".")) {
+            return;
+        }
         WatchKey key = dir.register(watcher, StandardWatchEventKinds.ENTRY_CREATE,
                 StandardWatchEventKinds.ENTRY_MODIFY, StandardWatchEventKinds.ENTRY_DELETE);
         watched.put(key, new WatchableDirectory(dir, projectPath, dependencyProject, model, webappName));
@@ -249,6 +253,10 @@ public class StartupListener implements ServletContextListener {
                         for (WatchEvent<?> event : events) {
                             try {
                                 Path filename = (Path) event.context();
+                                // do not copy .settings, .classpath, etc.
+                                if (filename.getFileName().startsWith(".")) {
+                                    continue;
+                                }
                                 Path eventPath = watchableDirectory.getDirectory().resolve(filename);
                                 Path target = determineTarget(watchableDirectory.getWebappName(), eventPath, watchableDirectory.getProjectPath());
                                 if (target != null) {
