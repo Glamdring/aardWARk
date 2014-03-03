@@ -325,12 +325,14 @@ public class StartupListener implements ServletContextListener {
     }
 
     private String getTargetWebapp(Model model) {
-        for (Plugin plugin : model.getBuild().getPlugins()) {
-            if (plugin.getArtifactId().equals("maven-war-plugin")) {
-                Xpp3Dom dom = (Xpp3Dom) plugin.getConfiguration();
-                Xpp3Dom[] element = dom.getChildren("warName");
-                if (element.length > 0) {
-                    return element[0].getValue();
+        if (model.getBuild() != null) {
+            for (Plugin plugin : model.getBuild().getPlugins()) {
+                if (plugin.getArtifactId().equals("maven-war-plugin")) {
+                    Xpp3Dom dom = (Xpp3Dom) plugin.getConfiguration();
+                    Xpp3Dom[] element = dom.getChildren("warName");
+                    if (element.length > 0) {
+                        return element[0].getValue();
+                    }
                 }
             }
         }
