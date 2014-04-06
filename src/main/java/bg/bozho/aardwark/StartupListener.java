@@ -362,7 +362,7 @@ public class StartupListener implements ServletContextListener {
             }
         }
 
-        logger.info("Copying maven dependencies. This may take some time, as some dependencies may have to be downloaded from a remote repository.");
+        logger.info("Copying maven dependencies of " + webappName + ". This may take some time, as some dependencies may have to be downloaded from a remote repository.");
 
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
         PrintStream out = new PrintStream(baos);
@@ -371,9 +371,9 @@ public class StartupListener implements ServletContextListener {
         out.close();
         String output = baos.toString("UTF-8");
         if (output.contains("FAILURE")) {
-            logger.warn("Problem with copying dependencies: " + output);
+            logger.warn("Problem with copying dependencies of " + webappName + ": " + output);
         }
-        logger.info("Copying dependencies successful");
+        logger.info("Copying dependencies of " + webappName + " successful");
         writeDependencyCopyNeeded(webappName);
     }
 
