@@ -336,7 +336,7 @@ public class StartupListener implements ServletContextListener {
                 }
             }
         }
-        return model.getArtifactId();
+        return model.getArtifactId() + "-" + model.getVersion();
     }
 
     Path determineTarget(String webappName, Path filePath, Path projectPath) {
