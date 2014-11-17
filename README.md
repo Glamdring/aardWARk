@@ -19,4 +19,5 @@ _Note_: the purpose of the project is to sync the classes and resources of your 
 * Regular <a href="http://docs.oracle.com/javase/1.4.2/docs/guide/jpda/enhancements.html">HotSwap</a> - simply run the servlet container in debug mode
 * <a href="https://github.com/spring-projects/spring-loaded">Spring-loaded</a> - a Spring-provided JVM agent that allows class reloading
 * <a href="http://ssw.jku.at/dcevm/">DCEVM</a> - a VM enhancement that allows complete reloading of classes
+* <a href="http://hotswapagent.org/">HotSwap agent</a> - the name says enough; makes use of DCEVM
 * JRebel - a commercial alternative
