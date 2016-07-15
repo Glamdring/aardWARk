@@ -12,6 +12,13 @@ Allows easy syncing of a maven project with a servlet container. How?
 
 3. Start your servlet container - everything (classes, resources, jars) will be synced whenever you make a change in your IDE. Note: jar files will be synchronized only on startup and after a successful build of your maven project.
 
+Note: Depending on the version of Tomcat (if using tomcat) you may have to define the order of loading of applications in server.xml, 
+
+    <Host ...>
+        <Context path="/aardwark-.workspace.foo"/>
+        <Context path="/foo"/>
+    </Host>
+
 The project is servlet-container-independent and IDE-independent.
 
 _Note_: the purpose of the project is to sync the classes and resources of your projects between your workspace and the servlet container. Reloading the classes is beyond the scope of this project. For that to work you have a couple of options:
